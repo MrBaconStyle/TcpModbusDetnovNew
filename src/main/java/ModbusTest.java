@@ -1,86 +1,8 @@
-//import net.wimpi.modbus.Modbus;
-//import net.wimpi.modbus.io.ModbusTCPTransaction;
-//import net.wimpi.modbus.msg.ReadInputRegistersRequest;
-//import net.wimpi.modbus.msg.ReadInputRegistersResponse;
-//import net.wimpi.modbus.net.TCPMasterConnection;
-//import net.wimpi.modbus.procimg.InputRegister;
-//import net.wimpi.modbus.util.BitVector;
-//
-//import java.net.InetAddress;
-//import java.util.ArrayList;
-//import java.util.List;
-//
-//public class ModbusTest {
-//
-//
-//    public static void main(String[] args) {
-//        String serverIp = "192.168.0.173"; // Replace with your Modbus server IP
-//        int serverPort = 502; // Replace with the server's Modbus TCP port
-//        int[] registerAddresses = {0x22}; // Replace with the desired register addresses
-////        short[] ALARMS_IN_LOOP = {0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67};
-////        int[] ALARM_ON_DETECTOR = {0x200, 0x300, 0x400, 0x600, 0x600, 0x700, 0x800, 0x900};
-////        short[] LOOP_STATUS_ARRAY = {0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57};
-//
-//        try {
-//            InetAddress serverAddress = InetAddress.getByName(serverIp);
-//
-//            TCPMasterConnection connection = new TCPMasterConnection(serverAddress);
-//            connection.setPort(serverPort);
-//            connection.connect();
-//
-//            int passCounter = 0;
-//
-//            while (true) {
-//                System.out.println("Pass: " + passCounter);
-//
-//                for (int registerAddress : registerAddresses) {
-//                    ReadInputRegistersRequest request = new ReadInputRegistersRequest(registerAddress, 1);
-//
-//                    ModbusTCPTransaction transaction = new ModbusTCPTransaction(connection);
-//                    transaction.setRequest(request);
-//                    transaction.execute();
-//
-//                    ReadInputRegistersResponse response = (ReadInputRegistersResponse) transaction.getResponse();
-//                    if (response != null) {
-//                        InputRegister[] registers = response.getRegisters();
-//                        for (InputRegister register : registers) {
-//                            int value = register.getValue();
-//                            System.out.println("Register HEX Value: " + value);
-//                            String binValue = intToBinary(value);
-//                            System.out.println("Register BIN Value: " + binValue);
-//                        }
-//                    } else {
-//                        System.out.println("No response received.");
-//                    }
-//                }
-//
-//                passCounter++;
-//                Thread.sleep(1000); // Delay between each pass (1 second in this example)
-//            }
-//
-//        } catch (Exception e) {
-//            e.printStackTrace();
-//        }
-//    }
-//
-//    public static String intToBinary(int hexValue) {
-//        String binaryString = Integer.toBinaryString(hexValue);
-//        String paddedBinary = String.format("%8s", binaryString).replace(' ', '0');
-//        return paddedBinary;
-//    }
-//}
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import net.wimpi.modbus.io.ModbusTCPTransaction;
 import net.wimpi.modbus.msg.ReadInputRegistersRequest;
 import net.wimpi.modbus.msg.ReadInputRegistersResponse;
 import net.wimpi.modbus.net.TCPMasterConnection;
 
-import java.io.File;
-import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
@@ -89,7 +11,6 @@ import java.util.List;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import java.net.URL;
 
@@ -106,6 +27,7 @@ public class ModbusTest {
         int[] loopArray = {0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67};
         int[] loopArrayFault = {0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77};
         int[] detectorArray = {0x200, 0x300, 0x400, 0x600, 0x600, 0x700, 0x800, 0x900};
+        int[] loopStatusArray = {0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57};
 
         try {
             InetAddress serverAddress = InetAddress.getByName(serverIp);
@@ -135,10 +57,14 @@ public class ModbusTest {
                 // Check for alarms and get detectors in alarm
                 List<String> detectorsInAlarm = getDetectorsInAlarm(connection, detectorArray, loopArray, registerMap);
 
-                System.out.println(registerMap);
+                // Check for removed and get removed detectors
+                List<String> removedDetectors = getRemovedDetectors(connection, detectorArray, loopArrayFault, registerMap);
+
+                System.out.println("0X50 " + Integer.toHexString(readRegisterValue(connection, 0x0050))); //Jurim LOOP STATUS
+                System.out.println("0X51 " + Integer.toHexString(readRegisterValue(connection, 0x0051))); //Jurim LOOP STATUS
 
                 // Create JSON string
-                String jsonString = createJsonString(registerMap, detectorsInAlarm);
+                String jsonString = createJsonString(registerMap, detectorsInAlarm, removedDetectors);
 
                 // Send the JSON string to the PHP script
                 sendJsonToPhp(jsonString);
@@ -150,66 +76,6 @@ public class ModbusTest {
                             " Value (BIN): " + intToBinary8Bits(registerValues[i]) +
                             " Value (DEC): " + registerValues[i]);
                 }
-
-//                // Check the last bit of register 0x2B for Alarm pocetni radi kako treba
-//                if (registerValues[10] >= 1) {
-//                    // Check array elements based on PanelType
-//                    int maxLoops = Math.min(PanelType, loopArray.length);
-//                    for (int i = 0; i < maxLoops; i++) {
-//                        int loopValueRegister = loopArray[i];
-//                        int loopValue = readRegisterValue(connection, loopValueRegister);
-//                        System.out.println("Loop " + (i + 1) + " have " + loopValue + " Alarm/s");
-//
-//                        // Check detectors in the loop if the loop is in alarm
-//                        if (loopValue > 0) {
-//                            // Assuming registerMap is a Map<String, Object> defined earlier in your code
-//                            checkDetectorsInAlarm(connection, detectorArray[i], i + 1, loopValue);
-//                        }
-//                    }
-//                }
-
-
-//                // Provera Alarma - Novi radi listu
-//                if (registerValues[10] >= 1) {
-//                    // Check array elements based on PanelType
-//                    int maxLoops = Math.min(PanelType, loopArray.length);
-//                    List<String> allDetectorsInAlarm = new ArrayList<>();
-//
-//                    for (int i = 0; i < maxLoops; i++) {
-//                        int loopValueRegister = loopArray[i];
-//                        int loopValue = readRegisterValue(connection, loopValueRegister);
-//
-//                        // Check detectors in the loop if the loop is in alarm
-//                        if (loopValue > 0) {
-//                            List<String> detectorsInAlarm = checkDetectorsInAlarm(connection, detectorArray[i], i + 1, loopValue);
-//
-//                            // Add detectorsInAlarm to the allDetectorsInAlarm list
-//                            allDetectorsInAlarm.addAll(detectorsInAlarm);
-//                        }
-//                    }
-//
-//                    // Print all detectors in alarm as a single string
-//                    if (!allDetectorsInAlarm.isEmpty()) {
-//                        System.out.println("Detectors in Alarm: " + String.join(", ", allDetectorsInAlarm));
-//                    }
-//                }
-
-
-//                // Check the last bit of register 0x2A and 0x21 for removed detector
-//                if ((registerValues[8] >= 1) && (registerValues[2] >= 11)) {
-//                    // Check array elements based on PanelType
-//                    int maxLoops = Math.min(PanelType, loopArrayFault.length);
-//                    for (int i = 0; i < maxLoops; i++) {
-//                        int loopValueRegister = loopArrayFault[i];
-//                        int loopValue = readRegisterValue(connection, loopValueRegister);
-//                        System.out.println("Loop " + (i + 1) + " have " + loopValue + " Fault/s");
-//
-//                        // Check detectors in the loop if the loop is in fault
-//                        if (loopValue > 0) {
-//                            checkDetectorsInFault(connection, detectorArray[i], i + 1, loopValue);
-//                        }
-//                    }
-//                }
 
                 passCounter++;
                 Thread.sleep(1000); // Delay between each pass (1 second in this example)
@@ -262,38 +128,6 @@ public class ModbusTest {
         return String.format("%8s", binaryString).replace(' ', '0');
     }
 
-//    //     Klasicna petlja za proveru alarma
-//    public static void checkDetectorsInAlarm(TCPMasterConnection connection, int startRegister, int loopIndex, int loopValue) {
-//        try {
-//            List<Integer> detectorsInAlarm = new ArrayList<>();
-//            int maxDetectors = 256; // Assuming the maximum number of detectors in a loop is 256
-//
-//            for (int i = 0; i < maxDetectors; i++) {
-//                int detectorRegister = startRegister + i;
-//                int detectorValue = readRegisterValue(connection, detectorRegister);
-//
-////                System.out.println("Checking: Loop " + loopIndex + "; Detector " + String.format("%03d", i + 1) +
-////                        " Value: " + detectorValue);
-//
-//                if (detectorValue == 2) { // Adjusted for value 2 indicating alarm
-//                    detectorsInAlarm.add(i + 1); // Adding detector number (1-based) to the list
-//
-//                    // Stop checking detectors if the required number of alarms is found
-//                    if (detectorsInAlarm.size() == loopValue) {
-//                        break;
-//                    }
-//                }
-//            }
-//
-//            // Print detectors in alarm for the loop if any
-//            if (!detectorsInAlarm.isEmpty()) {
-//                System.out.println("Alarms: Loop " + loopIndex + "; Detectors in Alarm: " + detectorsInAlarm);
-//            }
-//        } catch (Exception e) {
-//            e.printStackTrace();
-//        }
-//    }
-
     public static List<String> checkDetectorsInAlarm(TCPMasterConnection connection, int startRegister, int loopIndex, int loopValue) {
         List<String> detectorsInAlarm = new ArrayList<>();
         int maxDetectors = 256; // Assuming the maximum number of detectors in a loop is 256
@@ -336,86 +170,72 @@ public class ModbusTest {
         return detectorsInAlarm;
     }
 
-    public static void checkDetectorsInFault(TCPMasterConnection connection, int startRegister, int loopIndex, int loopValue) {
-        try {
-            List<Integer> detectorsInFault = new ArrayList<>();
-            int maxDetectors = 256; // Assuming the maximum number of detectors in a loop is 256
+    public static List<String> checkRemovedDetectors(TCPMasterConnection connection, int startRegister, int loopIndex, int loopValue) {
+        List<String> detectorsInFault = new ArrayList<>();
+        int maxDetectors = 256; // Assuming the maximum number of detectors in a loop is 256
 
-            for (int i = 0; i < maxDetectors; i++) {
-                int detectorRegister = startRegister + i;
-                int detectorValue = readRegisterValue(connection, detectorRegister);
+        for (int i = 0; i < maxDetectors; i++) {
+            int detectorRegister = startRegister + i;
+            int detectorValue = readRegisterValue(connection, detectorRegister);
 
-                if (detectorValue == 1) { // Adjusted for value 1 indicating fault
-                    detectorsInFault.add(i + 1); // Adding detector number (1-based) to the list
+            if (detectorValue == 1) { // 1 is fault on detector
+                detectorsInFault.add(loopIndex + "." + (1 + i)); // LoopIndex.detectorAddress
 
-                    // Stop checking detectors if the required number of alarms is found
-                    if (detectorsInFault.size() == loopValue) {
-                        break;
-                    }
+                // Stop checking detectors if the required number of faults is found
+                if (detectorsInFault.size() == loopValue) {
+                    break;
                 }
             }
-
-            // Print detectors in alarm for the loop if any
-            if (!detectorsInFault.isEmpty()) {
-                System.out.println("Faults: Loop " + loopIndex + "; Detectors in Alarm: " + detectorsInFault);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
         }
+
+        return detectorsInFault;
     }
 
-//    // Prva Json metoda
-//    private static String createJsonString(Map<String, Integer> registerMap) {
-//        StringBuilder jsonBuilder = new StringBuilder();
-//        jsonBuilder.append("{\"registers\":[");
-//
-//        for (Map.Entry<String, Integer> entry : registerMap.entrySet()) {
-//            jsonBuilder.append("{\"address\":\"").append(entry.getKey()).append("\",\"value\":").append(entry.getValue()).append("},");
-//        }
-//
-//        // Remove the trailing comma
-//        if (jsonBuilder.charAt(jsonBuilder.length() - 1) == ',') {
-//            jsonBuilder.deleteCharAt(jsonBuilder.length() - 1);
-//        }
-//
-//        jsonBuilder.append("]}");
-//
-//        return jsonBuilder.toString();
-//    }
+    private static List<String> getRemovedDetectors(TCPMasterConnection connection, int[] detectorArray, int[] loopArray, Map<String, Integer> registerMap) {
+        List<String> detectorsInFault = new ArrayList<>();
 
-//    // Pravljenje JSONA Statama sa REG i ALARMIMA
-//    private static String createJsonString(Map<String, Integer> registerMap, List<String> detectorsInAlarm) {
-//        StringBuilder jsonBuilder = new StringBuilder();
-//        jsonBuilder.append("{\"registers\":[");
-//
-//        // Populate registers array
-//        for (Map.Entry<String, Integer> entry : registerMap.entrySet()) {
-//            jsonBuilder.append("{\"address\":\"").append(entry.getKey()).append("\",\"value\":").append(entry.getValue()).append("},");
-//        }
-//
-//        // Remove the trailing comma
-//        if (jsonBuilder.charAt(jsonBuilder.length() - 1) == ',') {
-//            jsonBuilder.deleteCharAt(jsonBuilder.length() - 1);
-//        }
-//
-//        jsonBuilder.append("],\"alarms\":[");
-//
-//        // Populate alarms array
-//        for (String detector : detectorsInAlarm) {
-//            jsonBuilder.append("{\"point\":\"").append(detector).append("\"},");
-//        }
-//
-//        // Remove the trailing comma
-//        if (jsonBuilder.charAt(jsonBuilder.length() - 1) == ',') {
-//            jsonBuilder.deleteCharAt(jsonBuilder.length() - 1);
-//        }
-//
-//        jsonBuilder.append("]}");
-//
-//        return jsonBuilder.toString();
-//    }
+        // Iterate through loops and check removed detectors
+        int maxLoops = Math.min(PanelType, loopArray.length);
+        for (int i = 0; i < maxLoops; i++) {
+            int loopValueRegister = loopArray[i];
+            int loopValue = readRegisterValue(connection, loopValueRegister);
 
-    private static String createJsonString(Map<String, Integer> registerMap, List<String> alarms) {
+            // Check detectors in the loop if the loop is in fault
+            if (loopValue > 0) {
+                List<String> detectorsInLoop = checkRemovedDetectors(connection, detectorArray[i], i + 1, loopValue);
+
+                // Add detectors in loop to the main list
+                detectorsInFault.addAll(detectorsInLoop);
+            }
+        }
+
+        return detectorsInFault;
+    }
+
+    private static List<Integer> getLoopStatus(TCPMasterConnection connection, int[] loopArray, Map<String, Integer> registerMap) {
+        List<Integer> loopStatus = new ArrayList<>();
+
+        // Iterate through loops and check detectors in alarm
+        int maxLoops = Math.min(PanelType, loopArray.length);
+        for (int i = 0; i < maxLoops; i++) {
+            int loopValueRegister = loopArray[i];
+            int loopValue = readRegisterValue(connection, loopValueRegister);
+
+            System.out.println("STATUS PETLJICE " + loopValue);
+
+            // Check detectors in the loop if the loop is in alarm
+            if (loopValue == 1) {
+                System.out.println("YEEEEEEEEEEEEEEEEEEEEES");
+                // Add detectors in loop to the main list
+                loopStatus.add(loopValue);
+
+            }
+        }
+        System.out.println("Loopic Status: " + loopStatus);
+        return loopStatus;
+    }
+
+    private static String createJsonString(Map<String, Integer> registerMap, List<String> alarms, List<String> removed) {
         StringBuilder jsonBuilder = new StringBuilder();
         jsonBuilder.append("{\"registers\":[");
 
@@ -434,6 +254,18 @@ public class ModbusTest {
 
         for (String alarm : alarms) {
             jsonBuilder.append("{\"point\":\"").append(alarm).append("\"},");
+        }
+
+        // Remove the trailing comma
+        if (jsonBuilder.charAt(jsonBuilder.length() - 1) == ',') {
+            jsonBuilder.deleteCharAt(jsonBuilder.length() - 1);
+        }
+
+        // Process removed faults
+        jsonBuilder.append("],\"removed\":[");
+
+        for (String remove : removed) {
+            jsonBuilder.append("{\"point\":\"").append(remove).append("\"},");
         }
 
         // Remove the trailing comma
